@@ -22,27 +22,29 @@ from datetime import datetime
 # 設定（ここを変えてください）
 # ============================================================
 
-# 監視するバス停
-TARGET_STOP_SID  = "2efc7f02-b252-4ca6-9711-acc49969100d"  # 糸満バスターミナル
-TARGET_STOP_NAME = "糸満バスターミナル"
+# 監視するバス停（那覇バスターミナル = 上り終点）
+TARGET_STOP_SID  = ""  # 起動時に自動取得
+TARGET_STOP_NAME = "旭橋・那覇バスターミナル"  # 部分一致で検索
 
 # 到着判定の距離（メートル）
 ARRIVAL_METERS = 150
 
-# 糸満バスターミナル発（上り・那覇方面）平日時刻表（7〜10時）
+# 那覇バスターミナル着 平日時刻表（7〜10時）
 # 出典: https://www.kotsu-okinawa.org/time/89/up1.html
+# 糸満BT発 → 那覇BT着（約47分）
 SCHEDULED_TIMES = [
-    "07:05",
-    "07:10",
-    "07:25",
-    "07:40",
-    "07:55",
-    "08:10",
-    "08:30",
-    "08:50",
-    "09:15",
-    "09:40",
-    "09:55",
+    "07:47",  # 糸満BT 07:00発
+    "07:52",  # 糸満BT 07:05発（西崎経由）
+    "08:09",  # 糸満BT 07:10発（西崎経由）
+    "08:12",  # 糸満BT 07:25発
+    "08:28",  # 糸満BT 07:40発
+    "08:41",  # 糸満BT 07:55発
+    "09:01",  # 糸満BT 08:10発
+    "09:21",  # 糸満BT 08:30発（西崎経由）
+    "09:27",  # 糸満BT 08:50発
+    "09:51",  # 糸満BT 09:15発
+    "10:16",  # 糸満BT 09:40発
+    "10:31",  # 糸満BT 09:55発
 ]
 
 # 定刻との対応付け許容範囲（分）
@@ -116,21 +118,28 @@ def fetch_stations():
     return resp.json()
 
 def get_target_station_pos(stations):
-    """監視バス停の座標を返す"""
+    """監視バス停の座標を返す（名前の部分一致で検索）"""
     for s in stations:
-        if s.get("Sid") == TARGET_STOP_SID or TARGET_STOP_NAME in s.get("Name", ""):
+        if TARGET_STOP_NAME in s.get("Name", "") or TARGET_STOP_NAME in s.get("ShortName", ""):
             pos = s.get("Position", {})
-            return pos.get("Latitude"), pos.get("Longitude")
-    return None, None
+            sid = s.get("Sid", "")
+            return pos.get("Latitude"), pos.get("Longitude"), sid
+    return None, None, None
 
 def get_nearest_schedule(now_hhmm):
+    """
+    現在時刻に最も近い定刻を返す。
+    現在時刻より前の定刻（バスが出発済み）を優先し、
+    許容範囲内で最も近いものを選ぶ。
+    """
     now = datetime.strptime(now_hhmm, "%H:%M")
     best = None
     best_abs = None
     for s in SCHEDULED_TIMES:
         sched = datetime.strptime(s, "%H:%M")
-        diff = int((now - sched).total_seconds() / 60)
-        if abs(diff) <= SCHEDULE_MATCH_MINUTES:
+        diff = int((now - sched).total_seconds() / 60)  # プラス=遅延、マイナス=早着
+        # 許容範囲内（-5分〜+SCHEDULE_MATCH_MINUTES分）
+        if -5 <= diff <= SCHEDULE_MATCH_MINUTES:
             if best_abs is None or abs(diff) < best_abs:
                 best_abs = abs(diff)
                 best = (s, diff)
@@ -167,14 +176,16 @@ def main():
     print("\nバス停座標を取得中...")
     try:
         stations = fetch_stations()
-        target_lat, target_lon = get_target_station_pos(stations)
+        target_lat, target_lon, found_sid = get_target_station_pos(stations)
         if target_lat:
-            print(f"  {TARGET_STOP_NAME}: 緯度={target_lat:.6f} 経度={target_lon:.6f}")
+            print(f"  {TARGET_STOP_NAME}: 緯度={target_lat:.6f} 経度={target_lon:.6f} Sid={found_sid}")
         else:
-            print(f"  ⚠ {TARGET_STOP_NAME} が見つかりません。Sid で検索します。")
-            # フォールバック: 最初のバス停の座標で仮設定
-            target_lat = 26.1247
-            target_lon = 127.6651
+            print(f"  ⚠ {TARGET_STOP_NAME} が見つかりません。全バス停:")
+            for s in stations:
+                print(f"    {s.get('Name')} / {s.get('ShortName')}")
+            # 旭橋・那覇バスターミナル のりば10 のフォールバック座標
+            target_lat = 26.2155
+            target_lon = 127.6797
     except Exception as e:
         print(f"  バス停取得エラー: {e}")
         target_lat = 26.1247
@@ -182,7 +193,7 @@ def main():
 
     print(f"\n監視開始（Ctrl+C で停止）\n")
 
-    last_arrived_buses = {}  # bus_id → 最後に記録した分
+    last_arrived_buses = {}  # bus_id → 最後に記録したtimestamp
     count = 0
 
     while True:
@@ -236,14 +247,14 @@ def main():
         if arrived:
             print(f"{len(arrived)}台到着中")
             for bus in arrived:
-                cur_min = now.strftime("%Y%m%d%H%M")
-                last_min = last_arrived_buses.get(bus["id"])
+                cur_time = time.time()
+                last_time = last_arrived_buses.get(bus["id"], 0)
 
-                if last_min == cur_min:
-                    print(f"  → バスID={bus['id']} ({bus['plate']}) 記録済みスキップ")
+                if cur_time - last_time < 600:  # 10分以内は同一到着とみなす
+                    print(f"  → バスID={bus['id']} ({bus['plate']}) 記録済みスキップ（{int(cur_time - last_time)}秒前に記録）")
                     continue
 
-                last_arrived_buses[bus["id"]] = cur_min
+                last_arrived_buses[bus["id"]] = cur_time
                 sched = get_nearest_schedule(now_hhmm)
                 sched_time = sched[0] if sched else ""
                 delay      = sched[1] if sched else None

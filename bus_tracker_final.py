@@ -27,7 +27,9 @@ TARGET_STOP_SID  = ""  # 起動時に自動取得
 TARGET_STOP_NAME = "旭橋・那覇バスターミナル"  # 部分一致で検索
 
 # 到着判定の距離（メートル）
-ARRIVAL_METERS = 150
+# 先ほどのログで停車時24mを確認済み。GPSブレを考慮して80mに設定。
+# 検知が遅い/早い場合は50〜100mの間で調整してください。
+ARRIVAL_METERS = 80
 
 # 那覇バスターミナル着 平日時刻表（7〜10時）
 # 出典: https://www.kotsu-okinawa.org/time/89/up1.html
@@ -85,10 +87,22 @@ def haversine(lat1, lon1, lat2, lon2):
     a = math.sin(dp/2)**2 + math.cos(p1)*math.cos(p2)*math.sin(dl/2)**2
     return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
 
+def fetch_with_retry(url, params, retries=3, timeout=30):
+    """リトライ付きGETリクエスト"""
+    for attempt in range(1, retries + 1):
+        try:
+            resp = requests.get(url, params=params, headers=HEADERS, timeout=timeout)
+            resp.raise_for_status()
+            return resp.json()
+        except Exception as e:
+            print(f"\n  ⚠ 取得失敗({attempt}/{retries}): {e}")
+            if attempt < retries:
+                time.sleep(5 * attempt)  # 5秒、10秒と待機を延ばす
+    return None
+
 def fetch_bus_location():
     """BusLocation APIを叩いてバス一覧を返す"""
     ts = int(time.time() * 1000)
-    url = f"{BASE_URL}/BusLocation"
     params = {
         "datetime": "28",
         "keitouSid": KEITOU_SID,
@@ -97,14 +111,11 @@ def fetch_bus_location():
         "courseName": COURSE_NAME,
         "_": ts,
     }
-    resp = requests.get(url, params=params, headers=HEADERS, timeout=15)
-    resp.raise_for_status()
-    return resp.json()
+    return fetch_with_retry(f"{BASE_URL}/BusLocation", params)
 
 def fetch_stations():
     """GetStations APIでバス停一覧（座標付き）を返す"""
     ts = int(time.time() * 1000)
-    url = f"{BASE_URL}/GetStations"
     params = {
         "datetime": "28",
         "keitouSid": KEITOU_SID,
@@ -113,9 +124,7 @@ def fetch_stations():
         "courseName": COURSE_NAME,
         "_": ts,
     }
-    resp = requests.get(url, params=params, headers=HEADERS, timeout=15)
-    resp.raise_for_status()
-    return resp.json()
+    return fetch_with_retry(f"{BASE_URL}/GetStations", params)
 
 def get_target_station_pos(stations):
     """監視バス停の座標を返す（名前の部分一致で検索）"""
@@ -174,26 +183,32 @@ def main():
 
     # バス停の座標を取得
     print("\nバス停座標を取得中...")
-    try:
-        stations = fetch_stations()
-        target_lat, target_lon, found_sid = get_target_station_pos(stations)
-        if target_lat:
-            print(f"  {TARGET_STOP_NAME}: 緯度={target_lat:.6f} 経度={target_lon:.6f} Sid={found_sid}")
-        else:
-            print(f"  ⚠ {TARGET_STOP_NAME} が見つかりません。全バス停:")
-            for s in stations:
-                print(f"    {s.get('Name')} / {s.get('ShortName')}")
-            # 旭橋・那覇バスターミナル のりば10 のフォールバック座標
-            target_lat = 26.2155
-            target_lon = 127.6797
-    except Exception as e:
-        print(f"  バス停取得エラー: {e}")
-        target_lat = 26.1247
-        target_lon = 127.6651
+    target_lat, target_lon = None, None
+    for attempt in range(1, 6):
+        try:
+            stations = fetch_stations()
+            if stations:
+                target_lat, target_lon, found_sid = get_target_station_pos(stations)
+                if target_lat:
+                    print(f"  {TARGET_STOP_NAME}: 緯度={target_lat:.6f} 経度={target_lon:.6f}")
+                    break
+                else:
+                    print(f"  ⚠ {TARGET_STOP_NAME} が見つかりません。全バス停:")
+                    for s in stations:
+                        print(f"    {s.get('Name')} / {s.get('ShortName')}")
+                    target_lat, target_lon = 26.2155, 127.6797
+                    break
+        except Exception as e:
+            print(f"  取得エラー({attempt}/5): {e}")
+            time.sleep(5)
+    if target_lat is None:
+        print("  バス停座標の取得に失敗。フォールバック座標を使用します。")
+        target_lat, target_lon = 26.2155, 127.6797
 
     print(f"\n監視開始（Ctrl+C で停止）\n")
 
-    last_arrived_buses = {}  # bus_id → 最後に記録したtimestamp
+    last_arrived_buses = {}   # bus_id → 最後に記録したtimestamp
+    bus_inside_zone = {}      # bus_id → 現在閾値内にいるか（True/False）
     count = 0
 
     while True:
@@ -201,8 +216,17 @@ def main():
         now = datetime.now()
         now_hhmm = now.strftime("%H:%M")
 
-        # 7〜10時以外はスリープ（GitHub Actions 時間外対策）
-        if not (7 <= now.hour < 10):
+        # 平日かつ7〜10時以外はスリープ
+        weekday = now.weekday()  # 0=月 〜 4=金、5=土、6=日
+        is_weekday = weekday < 5
+        is_monitoring_hour = 7 <= now.hour < 10
+
+        if not is_weekday:
+            print(f"[{now.strftime('%H:%M:%S')}] 土日のため監視しません — 60秒待機")
+            time.sleep(60)
+            continue
+
+        if not is_monitoring_hour:
             print(f"[{now.strftime('%H:%M:%S')}] 監視時間外（7〜10時のみ） — 60秒待機")
             time.sleep(60)
             continue
@@ -212,7 +236,12 @@ def main():
         try:
             buses = fetch_bus_location()
         except Exception as e:
-            print(f"取得エラー: {e}")
+            print(f"取得エラー: {e} — {POLL_INTERVAL}秒後に再試行")
+            time.sleep(POLL_INTERVAL)
+            continue
+
+        if buses is None:
+            print("取得失敗（リトライ上限） — 次のポーリングまで待機")
             time.sleep(POLL_INTERVAL)
             continue
 
@@ -222,6 +251,8 @@ def main():
             continue
 
         arrived = []
+        current_ids = set()  # 今回のポーリングで閾値内にいるバスのID
+
         for bus_data in buses:
             bus = bus_data.get("Bus", {})
             pos = bus_data.get("Position", {})
@@ -237,24 +268,25 @@ def main():
             dist = haversine(float(lat), float(lon), target_lat, target_lon)
 
             if dist <= ARRIVAL_METERS:
-                arrived.append({
-                    "id": bus_id,
-                    "plate": plate,
-                    "company": company,
-                    "dist": dist,
-                })
+                current_ids.add(bus_id)
+                # 前回のポーリングで閾値外だった（＝今回初めて入った）場合のみ記録
+                if not bus_inside_zone.get(bus_id, False):
+                    arrived.append({
+                        "id": bus_id,
+                        "plate": plate,
+                        "company": company,
+                        "dist": dist,
+                    })
+                bus_inside_zone[bus_id] = True
+            else:
+                # 閾値外に出たらリセット（次回入ったときに再記録可能にする）
+                if bus_inside_zone.get(bus_id, False):
+                    print(f"  → バスID={bus_id} ({plate}) が {dist:.0f}m 離れました（ゾーン離脱）")
+                bus_inside_zone[bus_id] = False
 
         if arrived:
-            print(f"{len(arrived)}台到着中")
+            print(f"{len(arrived)}台到着")
             for bus in arrived:
-                cur_time = time.time()
-                last_time = last_arrived_buses.get(bus["id"], 0)
-
-                if cur_time - last_time < 600:  # 10分以内は同一到着とみなす
-                    print(f"  → バスID={bus['id']} ({bus['plate']}) 記録済みスキップ（{int(cur_time - last_time)}秒前に記録）")
-                    continue
-
-                last_arrived_buses[bus["id"]] = cur_time
                 sched = get_nearest_schedule(now_hhmm)
                 sched_time = sched[0] if sched else ""
                 delay      = sched[1] if sched else None

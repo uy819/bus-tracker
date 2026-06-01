@@ -15,8 +15,12 @@ import requests
 import json
 import csv
 import os
+import sys
 import time
 from datetime import datetime, timezone, timedelta
+
+# GitHub Actions でリアルタイムにログを表示するためバッファを無効化
+sys.stdout.reconfigure(line_buffering=True)
 
 JST = timezone(timedelta(hours=9))
 

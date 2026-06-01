@@ -16,7 +16,9 @@ import json
 import csv
 import os
 import time
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
+
+JST = timezone(timedelta(hours=9))
 
 # ============================================================
 # 設定（ここを変えてください）
@@ -175,6 +177,7 @@ def main():
     print("=" * 55)
     print("  バスなび沖縄 89番 糸満線（上り）到着記録")
     print("=" * 55)
+    print(f"  現在時刻(JST): {datetime.now(JST).strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"  監視バス停 : {TARGET_STOP_NAME}")
     print(f"  到着判定  : バス停から {ARRIVAL_METERS}m 以内")
     print(f"  更新間隔  : {POLL_INTERVAL}秒")
@@ -213,7 +216,7 @@ def main():
 
     while True:
         count += 1
-        now = datetime.now()
+        now = datetime.now(JST)  # 明示的にJSTで取得
         now_hhmm = now.strftime("%H:%M")
 
         # 平日かつ7〜10時以外はスリープ
@@ -221,10 +224,11 @@ def main():
         is_weekday = weekday < 5
         is_monitoring_hour = 7 <= now.hour < 10
 
-        if not is_weekday:
-            print(f"[{now.strftime('%H:%M:%S')}] 土日のため監視しません — 60秒待機")
-            time.sleep(60)
-            continue
+        # ★ テスト中は土日も動作させる。本番運用時は下の2行のコメントを外す
+        # if not is_weekday:
+        #     print(f"[{now.strftime('%H:%M:%S')}] 土日のため監視しません — 60秒待機")
+        #     time.sleep(60)
+        #     continue
 
         if not is_monitoring_hour:
             print(f"[{now.strftime('%H:%M:%S')}] 監視時間外（7〜10時のみ） — 60秒待機")

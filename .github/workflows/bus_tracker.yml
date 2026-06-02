@@ -12,10 +12,15 @@ on:
     - cron: '0 1 * * *'     # JST 10:00
   workflow_dispatch:         # 手動実行ボタン（テスト用）
 
+# 同時実行を1つに制限（前の実行が終わるまで次を待機）
+concurrency:
+  group: bus-tracker
+  cancel-in-progress: false  # 実行中のジョブはキャンセルせず待機
+
 jobs:
   track:
     runs-on: ubuntu-latest
-    timeout-minutes: 32      # 30分で自動停止
+    timeout-minutes: 29      # 29分で自動停止（次の30分起動と重複しないよう）
 
     steps:
       - name: リポジトリをチェックアウト
@@ -30,7 +35,7 @@ jobs:
         run: pip install requests
 
       - name: バス到着記録を実行
-        run: python bus_tracker_final.py
+        run: python -u bus_tracker_final.py
         env:
           TZ: Asia/Tokyo
 

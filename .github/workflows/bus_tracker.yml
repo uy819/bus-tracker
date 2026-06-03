@@ -8,21 +8,26 @@ on:
     - cron: '30 23 * * 1-5'   # JST 08:30 （月〜金）
     - cron: '0 0 * * 2-6'     # JST 09:00 （月〜金）
     - cron: '30 0 * * 2-6'    # JST 09:30 （月〜金）
-  workflow_dispatch:         # 手動実行ボタン（テスト用）
+  workflow_dispatch:           # 手動実行ボタン（テスト用）
 
-# 同時実行を1つに制限（前の実行が終わるまで次を待機）
+# 同時実行を1つに制限
 concurrency:
   group: bus-tracker
-  cancel-in-progress: false  # 実行中のジョブはキャンセルせず待機
+  cancel-in-progress: false
 
 jobs:
   track:
     runs-on: ubuntu-latest
-    timeout-minutes: 29      # 29分で自動停止（次の30分起動と重複しないよう）
+    timeout-minutes: 29
+    # リポジトリへの書き込み権限を付与
+    permissions:
+      contents: write
 
     steps:
-      - name: リポジトリをチェックアウト
+      - name: リポジトリをチェックアウト（既存CSVも含む）
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # 全履歴を取得してpushエラーを防ぐ
 
       - name: Python セットアップ
         uses: actions/setup-python@v5
@@ -37,23 +42,7 @@ jobs:
         env:
           TZ: Asia/Tokyo
 
-      - name: 既存のCSVをダウンロード（蓄積用）
-        uses: actions/download-artifact@v4
-        continue-on-error: true
-        with:
-          name: bus-arrival-log
-          path: .
-
-      - name: CSVを保存（Artifacts）
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: bus-arrival-log
-          path: bus_arrival_log.csv
-          retention-days: 365    # 1年間保持
-          overwrite: true
-
-      - name: CSVをリポジトリにコミット（蓄積）
+      - name: CSVをリポジトリにコミット（追記蓄積）
         if: always()
         run: |
           git config user.name "github-actions[bot]"

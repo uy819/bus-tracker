@@ -38,7 +38,7 @@ jobs:
         run: pip install requests beautifulsoup4
 
       - name: バス到着記録を実行
-        run: python -u bus_tracker_final.py
+        run: python -u bus_tracker_2.py
         env:
           TZ: Asia/Tokyo
 

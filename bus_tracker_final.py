@@ -203,14 +203,14 @@ def main():
                     print(f"  ⚠ {TARGET_STOP_NAME} が見つかりません。全バス停:")
                     for s in stations:
                         print(f"    {s.get('Name')} / {s.get('ShortName')}")
-                    target_lat, target_lon = 26.2155, 127.6797
+                    target_lat, target_lon = 26.211063, 127.676397
                     break
         except Exception as e:
             print(f"  取得エラー({attempt}/5): {e}")
             time.sleep(5)
     if target_lat is None:
         print("  バス停座標の取得に失敗。フォールバック座標を使用します。")
-        target_lat, target_lon = 26.2155, 127.6797
+        target_lat, target_lon = 26.211063, 127.676397
 
     print(f"\n監視開始（Ctrl+C で停止）\n")
 

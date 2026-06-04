@@ -9,7 +9,7 @@
     pip install requests
 
 実行:
-    python bus_tracker_final.py
+    python bus_tracker_2.py
 """
 
 import requests

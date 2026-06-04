@@ -30,7 +30,7 @@ JST = timezone(timedelta(hours=9))
 
 # 監視するバス停（那覇バスターミナル = 上り終点）
 TARGET_STOP_SID  = ""  # 起動時に自動取得
-TARGET_STOP_NAME = "旭橋・那覇バスターミナル"  # 部分一致で検索
+TARGET_STOP_NAME = "旭橋・那覇バスターミナル　のりば１０"  # 部分一致で検索
 
 # 到着判定の距離（メートル）
 # 先ほどのログで停車時24mを確認済み。GPSブレを考慮して80mに設定。

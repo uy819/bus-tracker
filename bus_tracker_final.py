@@ -136,10 +136,13 @@ def fetch_bus_state_table():
     BusStateTable: サーバー側判定済みの「どのバス停にバスがいるか」を取得。
     レスポンスはJSON文字列としてエスケープされているため resp.json() でデコードする。
 
+    <dt>タグの出現位置で区切ったセグメント単位で解析する
+    （</dd>への非貪欲マッチは入れ子構造で誤動作するため、dt位置分割が確実）。
+
     構造は2パターン:
-      A) <dt>番号</dt><dd>...バス停名・Sid・(あれば)icon_bus.png...</dd>
+      A) <dt>番号</dt> ... バス停名・Sid・(あれば)icon_bus.png ...
          → そのバス停に滞在中のバス
-      B) <dt class="iconBusDT"></dt><dd class="iconBusNow">icon_busNow.png...</dd>
+      B) <dt class="iconBusDT"></dt> ... icon_busNow.png ...
          → 直前のバス停(Aの最後に見つかったバス停)を出発し移動中のバス
 
     {sid: {"name": ..., "has_bus": bool}} を返す。
@@ -155,49 +158,37 @@ def fetch_bus_state_table():
     except Exception:
         html = resp.text
 
-    # --- デバッグ: 最初の数回だけレスポンスの状況を出力 ---
-    if os.environ.get("DEBUG_STATETABLE") == "1":
-        print(f"\n  [DEBUG] html length={len(html)}")
-        print(f"  [DEBUG] html head: {html[:200]!r}")
-        print(f"  [DEBUG] icon_bus count: {html.count('icon_bus')}")
-    # --------------------------------------------------------
-
     result = {}
     last_name, last_sid = None, None
 
-    # <dt>番号 または class="iconBusDT"</dt><dd ...>...</dd> を出現順にすべて拾う
-    pattern = re.compile(
-        r'<dt(?:\s+class="iconBusDT")?>(\d*)</dt>\s*<dd(?:\s+class="iconBusNow")?>(.*?)</dd>',
-        re.DOTALL
-    )
+    # <dt>タグの出現位置で区切る（通常版と iconBusDT 版の両方にマッチ）
+    dt_positions = [m.start() for m in re.finditer(r'<dt(?:\s+class="iconBusDT")?>', html)]
+    segments = []
+    for i, pos in enumerate(dt_positions):
+        end = dt_positions[i + 1] if i + 1 < len(dt_positions) else len(html)
+        segments.append(html[pos:end])
 
-    for m in pattern.finditer(html):
-        num, block = m.group(1), m.group(2)
+    for seg in segments:
+        num_m = re.match(r'<dt(?:\s+class="iconBusDT")?>(\d*)</dt>', seg)
+        num = num_m.group(1) if num_m else ""
+        has_bus = "icon_bus" in seg  # icon_bus.png / icon_busNow.png 両対応
 
         if num != "":
-            # パターンA: 通常のバス停ブロック
-            name_m = re.search(r'busstopClickPopUpInfo\(\d+\);?\s*>([^<]+)</a>', block)
-            sid_m  = re.search(r"getStationNo\(['\"]([^'\"]+)['\"]\)", block)
+            # パターンA: 通常のバス停セグメント
+            name_m = re.search(r'busstopClickPopUpInfo\(\d+\);?\s*>([^<]+)</a>', seg)
+            sid_m  = re.search(r"getStationNo\(['\"]([^'\"]+)['\"]\)", seg)
             if not name_m or not sid_m:
-                if os.environ.get("DEBUG_STATETABLE") == "1" and "icon_bus" in block:
-                    print(f"  [DEBUG] num={num} icon_bus検出だがname/sid抽出失敗 block={block[:150]!r}")
                 continue
             last_name = name_m.group(1).strip()
             last_sid  = sid_m.group(1)
-            has_bus = "icon_bus" in block  # icon_bus.png / icon_busNow.png 両対応
             result[last_sid] = {"name": last_name, "has_bus": has_bus}
-            if os.environ.get("DEBUG_STATETABLE") == "1" and has_bus:
-                print(f"  [DEBUG] PATTERN-A bus found: {last_name}")
         else:
             # パターンB: 移動中バス → 直前のバス停に紐づける
-            if "icon_bus" in block and last_sid:
+            if has_bus and last_sid:
                 result[last_sid] = {"name": last_name, "has_bus": True}
-                if os.environ.get("DEBUG_STATETABLE") == "1":
-                    print(f"  [DEBUG] PATTERN-B bus found, attached to: {last_name}")
 
     if os.environ.get("DEBUG_STATETABLE") == "1":
-        total_blocks = len(pattern.findall(html))
-        print(f"  [DEBUG] total dt/dd blocks matched: {total_blocks}")
+        print(f"  [DEBUG] segments: {len(segments)}")
         print(f"  [DEBUG] result has_bus count: {sum(1 for v in result.values() if v['has_bus'])}")
 
     return result

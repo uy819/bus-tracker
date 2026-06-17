@@ -177,10 +177,18 @@ def fetch_bus_state_table():
             # パターンA: 通常のバス停セグメント
             name_m = re.search(r'busstopClickPopUpInfo\(\d+\);?\s*>([^<]+)</a>', seg)
             sid_m  = re.search(r"getStationNo\(['\"]([^'\"]+)['\"]\)", seg)
-            if not name_m or not sid_m:
-                continue
-            last_name = name_m.group(1).strip()
-            last_sid  = sid_m.group(1)
+
+            if name_m and sid_m:
+                last_name = name_m.group(1).strip()
+                last_sid  = sid_m.group(1)
+            else:
+                if os.environ.get("DEBUG_STATETABLE") == "1":
+                    print(f"  [DEBUG] num={num} 名前/Sid抽出失敗 seg={seg[:400]!r}")
+                # 名前/Sidの抽出に失敗した場合でも、バス停番号をキーにして
+                # has_bus フラグだけは必ず記録する（バス検知の取りこぼし防止）
+                last_name = f"停留所#{num}（名称取得失敗）"
+                last_sid  = f"unknown-{num}"
+
             result[last_sid] = {"name": last_name, "has_bus": has_bus}
         else:
             # パターンB: 移動中バス → 直前のバス停に紐づける

@@ -179,15 +179,26 @@ def fetch_bus_state_table():
             name_m = re.search(r'busstopClickPopUpInfo\(\d+\);?\s*>([^<]+)</a>', block)
             sid_m  = re.search(r"getStationNo\(['\"]([^'\"]+)['\"]\)", block)
             if not name_m or not sid_m:
+                if os.environ.get("DEBUG_STATETABLE") == "1" and "icon_bus" in block:
+                    print(f"  [DEBUG] num={num} icon_bus検出だがname/sid抽出失敗 block={block[:150]!r}")
                 continue
             last_name = name_m.group(1).strip()
             last_sid  = sid_m.group(1)
             has_bus = "icon_bus" in block  # icon_bus.png / icon_busNow.png 両対応
             result[last_sid] = {"name": last_name, "has_bus": has_bus}
+            if os.environ.get("DEBUG_STATETABLE") == "1" and has_bus:
+                print(f"  [DEBUG] PATTERN-A bus found: {last_name}")
         else:
             # パターンB: 移動中バス → 直前のバス停に紐づける
             if "icon_bus" in block and last_sid:
                 result[last_sid] = {"name": last_name, "has_bus": True}
+                if os.environ.get("DEBUG_STATETABLE") == "1":
+                    print(f"  [DEBUG] PATTERN-B bus found, attached to: {last_name}")
+
+    if os.environ.get("DEBUG_STATETABLE") == "1":
+        total_blocks = len(pattern.findall(html))
+        print(f"  [DEBUG] total dt/dd blocks matched: {total_blocks}")
+        print(f"  [DEBUG] result has_bus count: {sum(1 for v in result.values() if v['has_bus'])}")
 
     return result
 

@@ -189,6 +189,7 @@ def fetch_bus_state_table():
 
     if os.environ.get("DEBUG_STATETABLE") == "1":
         print(f"  [DEBUG] segments: {len(segments)}")
+        print(f"  [DEBUG] icon_bus in html: {html.count('icon_bus')}")
         print(f"  [DEBUG] result has_bus count: {sum(1 for v in result.values() if v['has_bus'])}")
 
     return result

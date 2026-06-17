@@ -155,6 +155,13 @@ def fetch_bus_state_table():
     except Exception:
         html = resp.text
 
+    # --- デバッグ: 最初の数回だけレスポンスの状況を出力 ---
+    if os.environ.get("DEBUG_STATETABLE") == "1":
+        print(f"\n  [DEBUG] html length={len(html)}")
+        print(f"  [DEBUG] html head: {html[:200]!r}")
+        print(f"  [DEBUG] icon_bus count: {html.count('icon_bus')}")
+    # --------------------------------------------------------
+
     result = {}
     last_name, last_sid = None, None
 

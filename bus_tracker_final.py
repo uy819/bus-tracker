@@ -18,10 +18,13 @@ import sys
 import time
 import math
 import re
+import json
 from datetime import datetime, timezone, timedelta
 
 sys.stdout.reconfigure(line_buffering=True)
 JST = timezone(timedelta(hours=9))
+
+LIVE_JSON = "bus_live_position.json"  # リアルタイム地図用の最新バス位置ファイル
 
 # ============================================================
 # 設定
@@ -132,7 +135,13 @@ def fetch_bus_state_table():
     """
     BusStateTable: サーバー側判定済みの「どのバス停にバスがいるか」を取得。
     レスポンスはJSON文字列としてエスケープされているため resp.json() でデコードする。
-    構造: <dt>番号</dt><dd>...バス停名・Sid・(あれば)バスアイコン...</dd>
+
+    構造は2パターン:
+      A) <dt>番号</dt><dd>...バス停名・Sid・(あれば)icon_bus.png...</dd>
+         → そのバス停に滞在中のバス
+      B) <dt class="iconBusDT"></dt><dd class="iconBusNow">icon_busNow.png...</dd>
+         → 直前のバス停(Aの最後に見つかったバス停)を出発し移動中のバス
+
     {sid: {"name": ..., "has_bus": bool}} を返す。
     """
     resp = fetch_with_retry(f"{BASE_URL}/BusStateTable", API_PARAMS)
@@ -147,20 +156,31 @@ def fetch_bus_state_table():
         html = resp.text
 
     result = {}
+    last_name, last_sid = None, None
 
-    # <dt>番号</dt><dd>...</dd> 単位でブロックを区切る
-    # （バス停間移動中を示す <dt class="iconBusDT">...</dt> ブロックは番号なしなので除外される）
-    blocks = re.findall(r'<dt>\d+</dt>\s*<dd>(.*?)</dd>', html, re.DOTALL)
+    # <dt>番号 または class="iconBusDT"</dt><dd ...>...</dd> を出現順にすべて拾う
+    pattern = re.compile(
+        r'<dt(?:\s+class="iconBusDT")?>(\d*)</dt>\s*<dd(?:\s+class="iconBusNow")?>(.*?)</dd>',
+        re.DOTALL
+    )
 
-    for block in blocks:
-        name_m = re.search(r'busstopClickPopUpInfo\(\d+\);?\s*>([^<]+)</a>', block)
-        sid_m  = re.search(r"getStationNo\(['\"]([^'\"]+)['\"]\)", block)
-        if not name_m or not sid_m:
-            continue
-        name = name_m.group(1).strip()
-        sid  = sid_m.group(1)
-        has_bus = ("icon_bus.png" in block) or ("icon_busNow.png" in block)
-        result[sid] = {"name": name, "has_bus": has_bus}
+    for m in pattern.finditer(html):
+        num, block = m.group(1), m.group(2)
+
+        if num != "":
+            # パターンA: 通常のバス停ブロック
+            name_m = re.search(r'busstopClickPopUpInfo\(\d+\);?\s*>([^<]+)</a>', block)
+            sid_m  = re.search(r"getStationNo\(['\"]([^'\"]+)['\"]\)", block)
+            if not name_m or not sid_m:
+                continue
+            last_name = name_m.group(1).strip()
+            last_sid  = sid_m.group(1)
+            has_bus = "icon_bus" in block  # icon_bus.png / icon_busNow.png 両対応
+            result[last_sid] = {"name": last_name, "has_bus": has_bus}
+        else:
+            # パターンB: 移動中バス → 直前のバス停に紐づける
+            if "icon_bus" in block and last_sid:
+                result[last_sid] = {"name": last_name, "has_bus": True}
 
     return result
 
@@ -234,6 +254,42 @@ def save_record(rec):
         w.writerow(rec)
     print(f"  💾 {rec['バス停名'][:15]:15s} 着:{rec['到着時刻']} 定刻:{rec['定刻']:5s} [{rec['状況']}]")
 
+def save_live_positions(buses, now):
+    """リアルタイム地図表示用に、現在のバス位置をJSONファイルへ書き出す"""
+    items = []
+    if buses:
+        for b in buses:
+            pos = b.get("Position", {})
+            bus = b.get("Bus", {})
+            lat, lon = pos.get("Latitude"), pos.get("Longitude")
+            if not lat or not lon:
+                continue
+            items.append({
+                "lat": lat,
+                "lon": lon,
+                "plate": bus.get("NumberPlate", ""),
+                "company": bus.get("Company", {}).get("Name", ""),
+            })
+    payload = {
+        "updated_at": now.strftime("%Y-%m-%d %H:%M:%S"),
+        "route": "89番 糸満線（上り）",
+        "buses": items,
+    }
+    with open(LIVE_JSON, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
+
+def push_live_json():
+    """bus_live_position.json をその都度コミット・プッシュしてリアルタイム性を持たせる"""
+    try:
+        os.system('git config user.name "github-actions[bot]"')
+        os.system('git config user.email "github-actions[bot]@users.noreply.github.com"')
+        os.system(f"git add {LIVE_JSON}")
+        os.system('git commit -m "live update" --quiet')
+        os.system("git pull --rebase --quiet origin main")
+        os.system("git push --quiet")
+    except Exception as e:
+        print(f"  ⚠ push失敗: {e}")
+
 def main():
     print("=" * 60)
     print("  バスなび沖縄 89番 糸満線（上り）全停留所追跡")
@@ -292,6 +348,10 @@ def main():
             continue
 
         buses  = fetch_bus_location()
+        save_live_positions(buses, now)  # リアルタイム地図用JSONを更新
+        # 3回（約90秒）に1回だけGitHubにpushしてレート制限を回避
+        if count % 3 == 0:
+            push_live_json()
         active = [v["name"] for v in state.values() if v["has_bus"]]
         print(f"バスあり {len(active)}停留所" + (f": {active[0][:12]}..." if active else ""))
 

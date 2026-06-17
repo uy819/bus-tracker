@@ -274,7 +274,11 @@ def main():
         #     print(f"[{now.strftime('%H:%M:%S')}] 土日のため監視しません")
         #     time.sleep(60); continue
 
-        if not (7 <= now.hour < 10):
+        # IGNORE_TIME_CHECK=1 を設定すると時間帯チェックを無視して即座に監視開始
+        # （手動テスト実行用。本番のcronでは設定しない）
+        ignore_time_check = os.environ.get("IGNORE_TIME_CHECK", "0") == "1"
+
+        if not ignore_time_check and not (7 <= now.hour < 10):
             print(f"[{now.strftime('%H:%M:%S')}] 監視時間外 — 60秒待機")
             time.sleep(60)
             continue

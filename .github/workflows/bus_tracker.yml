@@ -1,7 +1,12 @@
 name: バス到着時刻記録（89番糸満線上り）
 
 on:
-  workflow_dispatch:           # 手動実行ボタンのみ
+  workflow_dispatch:           # 手動実行ボタン
+    inputs:
+      ignore_time_check:
+        description: '時間帯チェックを無視して即座に実行する（テスト用）'
+        type: boolean
+        default: true
 
 # 同時実行を1つに制限
 concurrency:
@@ -33,6 +38,7 @@ jobs:
         run: python -u bus_tracker_final.py
         env:
           TZ: Asia/Tokyo
+          IGNORE_TIME_CHECK: ${{ inputs.ignore_time_check && '1' || '0' }}
 
       - name: CSVをリポジトリにコミット
         if: always()

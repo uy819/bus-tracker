@@ -39,6 +39,7 @@ jobs:
         env:
           TZ: Asia/Tokyo
           IGNORE_TIME_CHECK: ${{ inputs.ignore_time_check && '1' || '0' }}
+          DEBUG_STATETABLE: "1"
 
       - name: CSVをリポジトリにコミット
         if: always()
@@ -46,7 +47,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git pull --rebase origin main || true
-          git add bus_arrival_log.csv || true
+          git add bus_arrival_log.csv bus_live_position.json || true
           git diff --staged --quiet || \
             git commit -m "🚌 バス到着記録 $(TZ=Asia/Tokyo date '+%Y-%m-%d %H:%M')"
           git push || true

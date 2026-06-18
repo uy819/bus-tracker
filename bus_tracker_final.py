@@ -297,13 +297,24 @@ def save_live_positions(buses, now):
         json.dump(payload, f, ensure_ascii=False, indent=2)
 
 def push_live_json():
-    """bus_live_position.json をその都度コミット・プッシュしてリアルタイム性を持たせる"""
+    """
+    bus_live_position.json をその都度コミット・プッシュしてリアルタイム性を持たせる。
+    bus_arrival_log.csv も実行中に追記され続けているため、未コミットの変更として
+    残っているとgit pull --rebaseが失敗する。そのため両方をまとめてコミットする。
+    """
     try:
         os.system('git config user.name "github-actions[bot]"')
         os.system('git config user.email "github-actions[bot]@users.noreply.github.com"')
-        os.system(f"git add {LIVE_JSON}")
-        os.system('git commit -m "live update" --quiet')
-        os.system("git pull --rebase --quiet origin main")
+        # 両方のファイルをステージング（CSVが存在しない場合は無視される）
+        os.system(f"git add {LIVE_JSON} {OUTPUT_CSV}")
+        # ステージされた変更がある場合のみコミット（無ければエラーにせず続行）
+        os.system('git commit -m "live update" --quiet || true')
+        # rebase pullが失敗した場合は中断して次回に持ち越す（CSVの記録自体は失われない）
+        pull_result = os.system("git pull --rebase --quiet origin main")
+        if pull_result != 0:
+            os.system("git rebase --abort 2>/dev/null || true")
+            print("  ⚠ pull --rebase 失敗のためpushをスキップ（次回再試行）")
+            return
         os.system("git push --quiet")
     except Exception as e:
         print(f"  ⚠ push失敗: {e}")
@@ -343,16 +354,11 @@ def main():
         count += 1
         now = datetime.now(JST)
 
-        # ★ テスト中は土日も動作。本番は下2行のコメントを外す
-        # if now.weekday() >= 5:
-        #     print(f"[{now.strftime('%H:%M:%S')}] 土日のため監視しません")
-        #     time.sleep(60); continue
-
         # IGNORE_TIME_CHECK=1 を設定すると時間帯チェックを無視して即座に監視開始
         # （手動テスト実行用。本番のcronでは設定しない）
         ignore_time_check = os.environ.get("IGNORE_TIME_CHECK", "0") == "1"
 
-        if not ignore_time_check and not (7 <= now.hour < 10):
+        if not ignore_time_check and not (7 <= now.hour < 9):
             print(f"[{now.strftime('%H:%M:%S')}] 監視時間外 — 60秒待機")
             time.sleep(60)
             continue

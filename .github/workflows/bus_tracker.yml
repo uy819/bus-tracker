@@ -1,14 +1,19 @@
 name: バス到着時刻記録（89番糸満線上り）
 
 on:
-  workflow_dispatch:           # 手動実行ボタン
+  schedule:
+    # JST 7:00〜9:00（UTC 22:00〜0:00）を30分ごとに起動
+    - cron: '0 22 * * 1-5'    # JST 月〜金 07:00
+    - cron: '30 22 * * 1-5'   # JST 月〜金 07:30
+    - cron: '0 23 * * 1-5'    # JST 月〜金 08:00
+    - cron: '30 23 * * 1-5'   # JST 月〜金 08:30
+  workflow_dispatch:
     inputs:
       ignore_time_check:
         description: '時間帯チェックを無視して即座に実行する（テスト用）'
         type: boolean
         default: true
 
-# 同時実行を1つに制限
 concurrency:
   group: bus-tracker
   cancel-in-progress: false
@@ -39,7 +44,7 @@ jobs:
         env:
           TZ: Asia/Tokyo
           IGNORE_TIME_CHECK: ${{ inputs.ignore_time_check && '1' || '0' }}
-          DEBUG_STATETABLE: "1"
+          DEBUG_STATETABLE: "0"
 
       - name: CSVをリポジトリにコミット
         if: always()

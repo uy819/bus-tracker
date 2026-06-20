@@ -358,8 +358,13 @@ def main():
         # （手動テスト実行用。本番のcronでは設定しない）
         ignore_time_check = os.environ.get("IGNORE_TIME_CHECK", "0") == "1"
 
-        if not ignore_time_check and not (7 <= now.hour < 9):
-            print(f"[{now.strftime('%H:%M:%S')}] 監視時間外 — 60秒待機")
+        # 9時以降は監視終了
+        if not ignore_time_check and now.hour >= 9:
+            print(f"[{now.strftime('%H:%M:%S')}] 監視時間終了（9時）— スクリプトを終了します")
+            break
+
+        if not ignore_time_check and now.hour < 7:
+            print(f"[{now.strftime('%H:%M:%S')}] 監視時間前 — 60秒待機")
             time.sleep(60)
             continue
 

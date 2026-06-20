@@ -2,11 +2,8 @@ name: バス到着時刻記録（89番糸満線上り）
 
 on:
   schedule:
-    # JST 7:00〜9:00（UTC 22:00〜0:00）を30分ごとに起動
+    # JST 07:00 に起動（UTC 22:00）→ スクリプト内で9時まで動作して自動終了
     - cron: '0 22 * * 1-5'    # JST 月〜金 07:00
-    - cron: '30 22 * * 1-5'   # JST 月〜金 07:30
-    - cron: '0 23 * * 1-5'    # JST 月〜金 08:00
-    - cron: '30 23 * * 1-5'   # JST 月〜金 08:30
   workflow_dispatch:
     inputs:
       ignore_time_check:
@@ -21,7 +18,7 @@ concurrency:
 jobs:
   track:
     runs-on: ubuntu-latest
-    timeout-minutes: 29
+    timeout-minutes: 120    # 2時間（7:00〜9:00をカバー）
     permissions:
       contents: write
 

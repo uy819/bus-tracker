@@ -3,7 +3,7 @@ name: バス到着時刻記録（89番糸満線上り）
 on:
   schedule:
     # JST 07:00 に起動（UTC 22:00）→ スクリプト内で9時まで動作して自動終了
-    - cron: '0 22 * * 1-5'    # JST 月〜金 07:00
+    - cron: '0 22 * * 0-4'    # JST 月〜金 07:00
   workflow_dispatch:
     inputs:
       ignore_time_check:
